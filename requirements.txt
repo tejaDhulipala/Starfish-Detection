@@ -1,0 +1,11 @@
+# torch from PyPI is the CUDA 13.2 build (supports Blackwell / sm_120)
+ipykernel==7.4.0
+jupyter==1.1.1
+matplotlib==3.11.2
+numpy==2.5.4
+pillow==13.0.0
+pytest==9.2.0
+PyYAML==6.0.3
+torch==2.15.0
+torchvision==0.29.2
+ultralytics==8.4.208

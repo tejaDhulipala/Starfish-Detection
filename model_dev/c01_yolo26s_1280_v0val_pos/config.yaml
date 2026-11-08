@@ -1,0 +1,10 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: YOLO26s baseline. COCO-pretrained, imgsz 1280, Ultralytics default hyperparameters.
+model: yolo26s.pt       # file in pretrained/, downloaded on first use
+split: v0val_pos        # data/yolo/<split>.yaml, made by src.data.make_yolo_split
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1280
+  epochs: 100
+  batch: 8              # set after the smoke test measures peak GPU memory
+  save_period: 1        # keep every epoch's checkpoint, so any epoch can be evaluated later

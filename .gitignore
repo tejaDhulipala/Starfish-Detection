@@ -1,3 +1,15 @@
 CLAUDE.md
-data/
-.venv/
+/data/
+/.venv/
+/pretrained/
+
+# model_dev: commit index.csv and each config.yaml, ignore run folders (weights, logs, eval)
+model_dev/*/*
+!model_dev/*/config.yaml
+
+# safety nets
+*.pt
+*.onnx
+__pycache__/
+.ipynb_checkpoints/
+.pytest_cache/
