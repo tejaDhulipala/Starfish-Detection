@@ -1,0 +1,12 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: YOLO26s, sequence-level 80/20 split (all 3 videos in train), F2 fitness, early stop after 25 epochs without F2 gain.
+model: yolo26s.pt       # file in pretrained/, downloaded on first use
+split: seq20val_pos     # data/yolo/<split>.yaml, made by src.data.make_yolo_split --val-seq-frac 0.2 --val-fast-step 1
+fitness: f2             # per-epoch val computes F2; best.pt and early stopping follow it
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1280
+  epochs: 100
+  patience: 25          # stop after 25 epochs without a new best F2
+  batch: 8
+  save_period: 1

@@ -45,4 +45,6 @@ python -m src.eval.evaluate --run model_dev/c01_yolo26s_1280_v0val_pos/seed0
 
 - One config per experiment. To change anything, copy the folder to a new `cNN_...` name.
 - Runs of the same config differ only by seed.
-- Per-epoch validation during training uses `val_fast` (every 5th frame of the val video). The full val set is only used by `src.eval.evaluate`, which computes the competition F2.
+- Per-epoch validation during training uses the split's `val_fast` list (a strided subset of val, set by `--val-fast-step`). `src.eval.evaluate` scores the full val set and gives the reported F2.
+- `fitness: f2` in a config makes per-epoch validation compute F2 and use it for `best.pt` and early stopping (`src/train/f2_validator.py`). Ultralytics' mAP columns stay in `results.csv` for reference.
+- Splits: `--val-video N` holds out a whole video; `--val-seq-frac 0.2` holds out whole sequences, chosen per video.

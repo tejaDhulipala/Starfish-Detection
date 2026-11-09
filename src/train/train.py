@@ -7,6 +7,10 @@ Writes model_dev/<config>/seed<N>/ (Ultralytics output: results.csv, args.yaml, 
 plus meta.json (git commit, config hash, versions) and train.log (all terminal output). Smoke runs go to <config>/smoke/ and
 are overwritten each time.
 
+Config keys: model, split, train (passed to Ultralytics), and optional fitness: f2, which
+makes per-epoch val compute F2 and use it for best.pt and early stopping
+(src/train/f2_validator.py). Without it, Ultralytics' default fitness (mAP50-95) is used.
+
 A config is frozen once it has a real run: if config.yaml no longer matches the hash in
 an existing run's meta.json, training refuses to start. Make a new config folder instead.
 """
@@ -138,7 +142,16 @@ def main():
     if not args.smoke:
         index.upsert(cfg_dir.name, description=cfg.get("description", ""))
 
-    model.train(data=str(data), project=str(cfg_dir), name=run_name, exist_ok=True, seed=args.seed, **overrides)
+    fitness = cfg.get("fitness", "map")
+    if fitness not in ("map", "f2"):
+        sys.exit(f"unknown fitness '{fitness}' in {cfg_path} (use map or f2)")
+    trainer = None
+    if fitness == "f2":
+        from src.train.f2_validator import F2DetectionTrainer
+
+        trainer = F2DetectionTrainer
+
+    model.train(trainer=trainer, data=str(data), project=str(cfg_dir), name=run_name, exist_ok=True, seed=args.seed, **overrides)
     print(f"\nrun dir: {run_dir}\nnext: python -m src.eval.evaluate --run {run_dir.relative_to(ROOT)}")
 
 

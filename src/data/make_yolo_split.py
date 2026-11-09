@@ -8,8 +8,10 @@ Layout (under data/yolo/):
     splits/<name>/split.csv            which frame went where
     <name>.yaml                        dataset config passed to Ultralytics
 
-Split rule: val = every frame of --val-video. Train = frames with boxes from the
-other videos, plus round(neg_frac * n_positive) randomly sampled empty frames.
+Split rule: val = every frame of --val-video, or (with --val-seq-frac F) every frame of
+whole sequences chosen per video to hold about F of that video's frames and of its
+frames with boxes (exhaustive search, so deterministic; see pick_val_sequences). Train = frames with boxes
+from everything else, plus round(neg_frac * n_positive) randomly sampled empty frames.
 
 The dataset yaml points Ultralytics' val at val_fast.txt: validating on all of
 val every epoch would cost more than the training epoch. Adjacent frames are
@@ -22,11 +24,13 @@ written is replaced; other splits under splits/ are left alone.
 Standard library only. Usage (from the repo root):
     python -m src.data.make_yolo_split --val-video 0
     python -m src.data.make_yolo_split --val-video 0 --neg-frac 0.2
+    python -m src.data.make_yolo_split --val-seq-frac 0.2
 """
 
 import argparse
 import ast
 import csv
+import itertools
 import random
 import shutil
 import struct
@@ -65,19 +69,54 @@ def label_path_for(img_path):
     return Path("/labels/".join(s.rsplit("/images/", 1)).rsplit(".", 1)[0] + ".txt")
 
 
+def pick_val_sequences(frames, frac):
+    """Per video, the subset of its sequences closest to frac of the video's frames and of
+    its frames with boxes, with at least one sequence with boxes on each side.
+
+    Box counts are not matched on purpose: a few dense sequences (e.g. 2/22643 holds 96%
+    of video 2's boxes) would dominate val, and micro-averaged F2 would measure one scene.
+    """
+    stats = {}
+    for fr in frames:
+        st = stats.setdefault((fr["video_id"], fr["sequence"]), [0, 0])
+        st[0] += 1
+        st[1] += fr["n_boxes"] > 0
+    chosen = set()
+    for video in sorted({v for v, _ in stats}):
+        keys = sorted(k for k in stats if k[0] == video)
+        totals = [sum(stats[k][i] for k in keys) for i in range(2)]
+        best, best_score = None, float("inf")
+        for mask in itertools.product((0, 1), repeat=len(keys)):
+            val = [k for k, m in zip(keys, mask) if m]
+            train = [k for k, m in zip(keys, mask) if not m]
+            if not any(stats[k][1] for k in val) or not any(stats[k][1] for k in train):
+                continue
+            score = sum(abs(sum(stats[k][i] for k in val) / totals[i] - frac) for i in range(2))
+            if score < best_score:
+                best, best_score = val, score
+        assert best is not None, f"video {video}: no subset with positives on both sides"
+        chosen.update(best)
+    return chosen
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", type=Path, default=PROJECT_DIR / "data")
-    ap.add_argument("--val-video", type=int, default=0)
+    which = ap.add_mutually_exclusive_group()
+    which.add_argument("--val-video", type=int, default=None, help="hold out this whole video (default: 0)")
+    which.add_argument("--val-seq-frac", type=float, default=None, help="hold out whole sequences, about this fraction")
     ap.add_argument("--neg-frac", type=float, default=0.0, help="empty train frames as a fraction of positive train frames")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--val-fast-step", type=int, default=5, help="val_fast keeps every Nth val frame")
-    ap.add_argument("--name", default=None, help="split name (default: v{val}val_pos[_neg{pct}])")
+    ap.add_argument("--name", default=None, help="split name (default: v{video}val_pos or seq{pct}val_pos, plus _neg{pct})")
     args = ap.parse_args()
+    if args.val_video is None and args.val_seq_frac is None:
+        args.val_video = 0
 
     data_dir = args.data_dir.resolve()
     yolo_dir = data_dir / "yolo"
-    name = args.name or f"v{args.val_video}val_pos" + (f"_neg{round(args.neg_frac * 100)}" if args.neg_frac else "")
+    held_out = f"v{args.val_video}" if args.val_seq_frac is None else f"seq{round(args.val_seq_frac * 100)}"
+    name = args.name or f"{held_out}val_pos" + (f"_neg{round(args.neg_frac * 100)}" if args.neg_frac else "")
 
     # Read annotations
     frames = []
@@ -92,7 +131,7 @@ def main():
                 "boxes": boxes,
             })
     videos = sorted({fr["video_id"] for fr in frames})
-    assert args.val_video in videos, f"--val-video {args.val_video} not in {videos}"
+    assert args.val_video is None or args.val_video in videos, f"--val-video {args.val_video} not in {videos}"
 
     # Images symlink (relative, so the project folder can move)
     yolo_dir.mkdir(exist_ok=True)
@@ -123,8 +162,15 @@ def main():
         lp.write_text("\n".join(lines) + ("\n" if lines else ""))
 
     # Split
-    val = [fr for fr in frames if fr["video_id"] == args.val_video]
-    rest = [fr for fr in frames if fr["video_id"] != args.val_video]
+    if args.val_seq_frac is None:
+        in_val = lambda fr: fr["video_id"] == args.val_video
+        val_desc = f"video {args.val_video}"
+    else:
+        val_seqs = pick_val_sequences(frames, args.val_seq_frac)
+        in_val = lambda fr: (fr["video_id"], fr["sequence"]) in val_seqs
+        val_desc = "sequences " + ", ".join(f"{v}/{s}" for v, s in sorted(val_seqs))
+    val = [fr for fr in frames if in_val(fr)]
+    rest = [fr for fr in frames if not in_val(fr)]
     train_pos = [fr for fr in rest if fr["n_boxes"] > 0]
     train_neg_pool = [fr for fr in rest if fr["n_boxes"] == 0]
     n_neg = min(round(args.neg_frac * len(train_pos)), len(train_neg_pool))
@@ -145,8 +191,10 @@ def main():
             for fr in subset:
                 w.writerow([fr["image_id"], fr["video_id"], fr["sequence"], fr["video_frame"], fr["n_boxes"], split])
     (yolo_dir / f"{name}.yaml").write_text(
-        f"# Generated by src/data/make_yolo_split.py --val-video {args.val_video} "
-        f"--neg-frac {args.neg_frac} --seed {args.seed} --val-fast-step {args.val_fast_step}\n"
+        f"# Generated by src/data/make_yolo_split.py "
+        + (f"--val-video {args.val_video} " if args.val_seq_frac is None else f"--val-seq-frac {args.val_seq_frac} ")
+        + f"--neg-frac {args.neg_frac} --seed {args.seed} --val-fast-step {args.val_fast_step}\n"
+        f"# val: {val_desc}\n"
         f"# val is the strided val_fast list; full val is splits/{name}/val.txt\n"
         f"path: {yolo_dir}\n"
         f"train: splits/{name}/train.txt\n"
@@ -174,7 +222,7 @@ def main():
         return f"{len(subset)} frames ({n_pos} with boxes, {len(subset) - n_pos} empty), {sum(fr['n_boxes'] for fr in subset)} boxes"
 
     print(f"labels: {len(frames)} files in {labels_dir}  (boxes clipped: {n_clipped}, dropped: {n_dropped})")
-    print(f"split '{name}': val = video {args.val_video}, train = videos {[v for v in videos if v != args.val_video]}")
+    print(f"split '{name}': val = {val_desc}")
     print(f"  train: {summary(train)}")
     print(f"  val:   {summary(val)}")
     print(f"  val_fast (every {args.val_fast_step}th val frame): {summary(val_fast)}")
