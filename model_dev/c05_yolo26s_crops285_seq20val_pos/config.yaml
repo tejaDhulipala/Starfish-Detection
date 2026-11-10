@@ -1,0 +1,26 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: 2.85x upscale (1st place's 3648 px) via 449x253 crops trained at 1280 with rect; full-frame val and inference at 3648. c04's augmentation otherwise.
+model: yolo26s.pt       # file in pretrained/, downloaded on first use
+split: crops285_seq20val_pos  # made by src.data.make_crop_split --base seq20val_pos --scale 2.85
+fitness: f2             # per-epoch val computes F2; best.pt and early stopping follow it
+val_imgsz: 3648         # full frames at 2.85x (3648x2080 tensors), the scale the crops are trained at
+val_batch: 4
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1280           # 449x253 crop -> long side 1280 = 2.85x upscale
+  rect: true            # batches are 1280x736, not 1280x1280; all crops share one shape, so shuffle stays on
+  epochs: 30            # ~9k crops/epoch (about 2x c04's samples), so 30 epochs is roughly c04's compute
+  patience: 20
+  batch: 8
+  save_period: 1
+
+  # Augmentation (Ultralytics defaults in brackets)
+  mosaic: 0.0           # [1.0] rect forces it off anyway; explicit so the config says what runs
+  mixup: 0.0            # [0.0] also forced off by rect
+  hsv_h: 0.0            # [0.015] color jitter off: color is a plausible cue for COTS vs coral
+  hsv_s: 0.0            # [0.7]
+  hsv_v: 0.0            # [0.4]
+  degrees: 10.0         # [0.0]
+  fliplr: 0.5           # [0.5]
+  flipud: 0.5           # [0.0] starfish have no "up"
+  scale: 0.2            # [0.5] same as c04, so the comparison isolates resolution

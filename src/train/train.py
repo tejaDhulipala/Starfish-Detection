@@ -10,6 +10,8 @@ are overwritten each time.
 Config keys: model, split, train (passed to Ultralytics), and optional fitness: f2, which
 makes per-epoch val compute F2 and use it for best.pt and early stopping
 (src/train/f2_validator.py). Without it, Ultralytics' default fitness (mAP50-95) is used.
+Optional val_imgsz / val_batch run per-epoch validation at a different size than training
+(for crop training: train on upscaled crops at 1280, validate on full frames at e.g. 3648).
 
 A config is frozen once it has a real run: if config.yaml no longer matches the hash in
 an existing run's meta.json, training refuses to start. Make a new config folder instead.
@@ -65,6 +67,39 @@ def tee_output(log_path):
     os.dup2(tee.stdin.fileno(), sys.stdout.fileno())
     os.dup2(tee.stdin.fileno(), sys.stderr.fileno())
     sys.stdout.reconfigure(line_buffering=True)  # keep prints and tracebacks in order in the log
+
+
+def with_val_overrides(base, val_imgsz=None, val_batch=None):
+    """Trainer subclass whose per-epoch validation runs at val_imgsz with batch val_batch.
+
+    For crop training (train imgsz 1280 on upscaled crops), val must run on full frames at
+    the upscaled size, or F2, best.pt and early stopping would be measured at the wrong scale.
+    Ultralytics builds the val loader from the training args, so imgsz is swapped while it is built.
+    """
+
+    class ValOverrideTrainer(base):
+        def build_dataset(self, img_path, mode="train", batch=None):
+            if mode != "val" or not val_imgsz:
+                return super().build_dataset(img_path, mode, batch)
+            train_imgsz, self.args.imgsz = self.args.imgsz, val_imgsz
+            try:
+                return super().build_dataset(img_path, mode, batch)
+            finally:
+                self.args.imgsz = train_imgsz
+
+        def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
+            if mode == "val" and val_batch:
+                batch_size = val_batch
+            return super().get_dataloader(dataset_path, batch_size, rank, mode)
+
+        def get_validator(self):
+            validator = super().get_validator()
+            if val_imgsz:
+                validator.args.imgsz = val_imgsz
+            return validator
+
+    ValOverrideTrainer.__name__ = f"{base.__name__}ValOverride"
+    return ValOverrideTrainer
 
 
 def main():
@@ -150,6 +185,10 @@ def main():
         from src.train.f2_validator import F2DetectionTrainer
 
         trainer = F2DetectionTrainer
+    if cfg.get("val_imgsz") or cfg.get("val_batch"):
+        from ultralytics.models.yolo.detect import DetectionTrainer
+
+        trainer = with_val_overrides(trainer or DetectionTrainer, cfg.get("val_imgsz"), cfg.get("val_batch"))
 
     model.train(trainer=trainer, data=str(data), project=str(cfg_dir), name=run_name, exist_ok=True, seed=args.seed, **overrides)
     print(f"\nrun dir: {run_dir}\nnext: python -m src.eval.evaluate --run {run_dir.relative_to(ROOT)}")

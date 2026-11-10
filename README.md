@@ -8,7 +8,7 @@ Crown-of-thorns starfish (COTS) detection on the Kaggle `tensorflow-great-barrie
 src/                 all code, run as modules from the repo root (python -m src....)
   paths.py           project paths
   index.py           model_dev/index.csv helpers
-  data/              make_yolo_split.py, check_labels.ipynb
+  data/              make_yolo_split.py, make_crop_split.py, check_labels.ipynb
   train/             train.py
   eval/              f2.py (competition metric), test_f2.py, evaluate.py
   inference/         predict.py (frame in, detections out; shared with Kaggle)
@@ -48,3 +48,4 @@ python -m src.eval.evaluate --run model_dev/c01_yolo26s_1280_v0val_pos/seed0
 - Per-epoch validation during training uses the split's `val_fast` list (a strided subset of val, set by `--val-fast-step`). `src.eval.evaluate` scores the full val set and gives the reported F2.
 - `fitness: f2` in a config makes per-epoch validation compute F2 and use it for `best.pt` and early stopping (`src/train/f2_validator.py`). Ultralytics' mAP columns stay in `results.csv` for reference.
 - Splits: `--val-video N` holds out a whole video; `--val-seq-frac 0.2` holds out whole sequences, chosen per video.
+- Crop splits (`src.data.make_crop_split --base <split> --scale S`): train on crops of (1280/S) x (720/S) px at `imgsz: 1280, rect: true`, which upscales them S times; set `val_imgsz` in the config (e.g. 3648 for S = 2.85) so per-epoch val and `src.eval.evaluate` run on full frames at the same scale.

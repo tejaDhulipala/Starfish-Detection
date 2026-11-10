@@ -75,7 +75,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", type=Path, required=True)
     ap.add_argument("--weights", nargs="+", default=["best", "last"], help="names in <run>/weights/ without .pt")
-    ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--batch", type=int, default=None, help="default: the config's val_batch, else 16")
     ap.add_argument("--limit", type=int, default=None, help="evaluate a strided subset of about N val frames")
     ap.add_argument("--force", action="store_true", help="re-run prediction even if cached")
     args = ap.parse_args()
@@ -83,7 +83,9 @@ def main():
     run = args.run.resolve()
     meta = json.loads((run / "meta.json").read_text())
     cfg = meta["config"]
-    imgsz = cfg.get("train", {}).get("imgsz", 640)
+    imgsz = cfg.get("val_imgsz") or cfg.get("train", {}).get("imgsz", 640)
+    if args.batch is None:
+        args.batch = cfg.get("val_batch") or 16
     frames = val_frames(cfg["split"])
     suffix = ""
     if args.limit:
