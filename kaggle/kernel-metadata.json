@@ -1,0 +1,17 @@
+{
+  "id": "tejadhu/starfish-c04-onnx-submit",
+  "title": "starfish c04 onnx submit",
+  "code_file": "submission.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": false,
+  "machine_shape": "Gpu",
+  "dataset_sources": ["tejadhu/starfish-c04-onnx"],
+  "competition_sources": ["tensorflow-great-barrier-reef"],
+  "kernel_sources": [],
+  "model_sources": [],
+  "docker_image": "gcr.io/kaggle-private-byod/python@sha256:7b500f6081e92f812db283da919abe5e305c17a7130d456ddd8ddbd7da786e50",
+  "docker_image_pinning_type": "original"
+}
