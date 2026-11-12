@@ -5,3 +5,4 @@ c03_yolo26s_1280_seq20val_pos_aug,"c02 + augmentation changes (no HSV, rotation 
 c04_yolo26s_1920_seq20val_pos_aug,"c03 at imgsz 1920 (1.5x upscale of the 1280x720 frames), batch 4 to fit memory. Tests whether resolution helps.",0.6192,0.28,seed0,best
 c05_yolo26s_crops285_seq20val_pos,2.85x upscale (1st place's 3648 px) via 449x253 crops trained at 1280 with rect; full-frame val and inference at 3648. c04's augmentation otherwise.,0.5840,0.51,seed0,best
 c06_c05ft_grid493_3x2_seq20val_pos_aug,"Fine-tune c05 best.pt on a 3x2 overlapping grid of 493x493 tiles at imgsz 1408 (2.856x), sliver tiles dropped, 25% empty tiles, square training with mosaic 0.25, mixup 0.25 and exact rot90. Full-frame val at 3648.",0.6969,0.31,seed0,best
+c07_c05ft_grid493_3x2_e50_seq20val_pos_aug,"c06 with 50% empty grid tiles (was 25%) to cut c06's false alarms on empty frames (213 vs c04's 137), and a 12-epoch schedule since c06 peaked at epoch 6 of 20.",0.6932,0.26,seed0,best
