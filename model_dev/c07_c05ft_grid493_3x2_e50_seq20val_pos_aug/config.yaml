@@ -1,0 +1,34 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: c06 with 50% empty grid tiles (was 25%) to cut c06's false alarms on empty frames (213 vs c04's 137), and a 12-epoch schedule since c06 peaked at epoch 6 of 20.
+model: model_dev/c05_yolo26s_crops285_seq20val_pos/seed0/weights/best.pt  # warm start at c05's 2.85x scale
+split: grid493_3x2_e50_seq20val_pos  # make_grid_split --base seq20val_pos --empty-frac 0.5 --name grid493_3x2_e50_seq20val_pos
+fitness: f2             # per-epoch val computes F2; best.pt and early stopping follow it
+val_imgsz: 3648         # full frames at 2.85x (3648x2080), the scale the tiles are trained at
+val_batch: 4
+rot90: 0.5              # exact quarter turn (src/train/rot90.py); with both flips gives all 8 orientations
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1408           # 493 px tile -> 1408 = 2.856x (1405 rounded up to a multiple of 32)
+  rect: false           # square tiles, square batches; mosaic and mixup need rect off
+  epochs: 12            # c06 peaked at epoch 6 of 20; 18.2k tiles/epoch (1.5x c06)
+  patience: 6
+  batch: 6              # set from the smoke test's GPU memory; gradients accumulate to nbs=64
+  save_period: 1
+
+  # Warm start: c05 trained with AdamW lr 0.002 (picked by optimizer=auto). Lower LR, short warmup.
+  optimizer: AdamW
+  lr0: 0.0005
+  lrf: 0.1              # [0.01] ends at 5e-5
+  warmup_epochs: 1.0    # [3.0]
+  close_mosaic: 4       # [10] mosaic off for the last 4 of 12 epochs
+
+  # Augmentation (Ultralytics defaults in brackets)
+  mosaic: 0.25          # [1.0]
+  mixup: 0.25           # [0.0]
+  hsv_h: 0.0            # [0.015] color jitter off: color is a plausible cue for COTS vs coral
+  hsv_s: 0.0            # [0.7]
+  hsv_v: 0.0            # [0.4]
+  degrees: 0.0          # [0.0] rot90 replaces c05's 10-degree rotation (exact boxes, no loosening)
+  fliplr: 0.5           # [0.5]
+  flipud: 0.5           # [0.0] starfish have no "up"
+  scale: 0.2            # [0.5] same as c04/c05
