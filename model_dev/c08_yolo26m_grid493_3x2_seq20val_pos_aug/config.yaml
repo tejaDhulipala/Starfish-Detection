@@ -1,0 +1,31 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: YOLO26m from COCO on c06's data and augmentation (3x2 grid of 493x493 tiles at imgsz 1408, 2.856x; sliver tiles dropped; 25% empty; mosaic 0.25, mixup 0.25, rot90). 50 epochs. Full-frame val at 3648.
+model: yolo26m.pt       # file in pretrained/, downloaded on first use (no warm start: c05 is a different architecture)
+split: grid493_3x2_seq20val_pos  # same tiles as c06
+fitness: f2             # per-epoch val computes F2; best.pt follows it
+val_imgsz: 3648         # full frames at 2.85x (3648x2080), the scale the tiles are trained at
+val_batch: 2            # m at 3648 (smoke test peak 12.7 GB of 16)
+rot90: 0.5              # exact quarter turn (src/train/rot90.py); with both flips gives all 8 orientations
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1408           # 493 px tile -> 1408 = 2.856x
+  rect: false           # square tiles, square batches; mosaic and mixup need rect off
+  epochs: 50
+  patience: 50          # run all 50 epochs; best.pt still follows F2
+  batch: 3              # smoke test: 9.1 GB train, 12.7 GB GPU peak (incl. val at 3648, batch 2); accumulates to nbs=64
+  save_period: 1
+
+  # From COCO, not a warm start: optimizer, LR and warmup left to Ultralytics' defaults
+  # (optimizer=auto picks AdamW lr 0.002, momentum 0.9 for 9.5k iterations, as it did for c05)
+  close_mosaic: 10      # [10] mosaic off for the last 10 of 50 epochs
+
+  # Augmentation (Ultralytics defaults in brackets), same as c06
+  mosaic: 0.25          # [1.0]
+  mixup: 0.25           # [0.0]
+  hsv_h: 0.0            # [0.015] color jitter off: color is a plausible cue for COTS vs coral
+  hsv_s: 0.0            # [0.7]
+  hsv_v: 0.0            # [0.4]
+  degrees: 0.0          # [0.0] rot90 instead
+  fliplr: 0.5           # [0.5]
+  flipud: 0.5           # [0.0] starfish have no "up"
+  scale: 0.2            # [0.5]
