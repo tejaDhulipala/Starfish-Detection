@@ -1,3 +1,6 @@
 config,description,best_f2,best_conf,best_run,best_weights
 c01_yolo26s_1280_v0val_pos,"YOLO26s baseline. COCO-pretrained, imgsz 1280, Ultralytics default hyperparameters.",,,,
 c02_yolo26s_1280_seq20val_pos,"YOLO26s, sequence-level 80/20 split (all 3 videos in train), F2 fitness, early stop after 25 epochs without F2 gain.",,,,
+c03_yolo26s_1280_seq20val_pos_aug,"c02 + augmentation changes (no HSV, rotation 10, both flips, mixup 0.15, scale 0.2) and a 45-epoch schedule.",,,,
+c04_yolo26s_1920_seq20val_pos_aug,"c03 at imgsz 1920 (1.5x upscale of the 1280x720 frames), batch 4 to fit memory. Tests whether resolution helps.",0.6192,0.28,seed0,best
+c05_yolo26s_crops285_seq20val_pos,2.85x upscale (1st place's 3648 px) via 449x253 crops trained at 1280 with rect; full-frame val and inference at 3648. c04's augmentation otherwise.,0.5840,0.51,seed0,best

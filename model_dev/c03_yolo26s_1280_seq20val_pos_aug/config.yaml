@@ -1,0 +1,22 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: c02 + augmentation changes (no HSV, rotation 10, both flips, mixup 0.15, scale 0.2) and a 45-epoch schedule.
+model: yolo26s.pt       # file in pretrained/, downloaded on first use
+split: seq20val_pos     # data/yolo/<split>.yaml, made by src.data.make_yolo_split --val-seq-frac 0.2 --val-fast-step 1
+fitness: f2             # per-epoch val computes F2; best.pt and early stopping follow it
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1280
+  epochs: 45            # LR decays to lrf over 45 epochs; mosaic turns off for the last 10 (close_mosaic default)
+  patience: 25          # stop after 25 epochs without a new best F2
+  batch: 8
+  save_period: 1
+
+  # Augmentation (Ultralytics defaults in brackets)
+  hsv_h: 0.0            # [0.015] color jitter off: color is a plausible cue for COTS vs coral
+  hsv_s: 0.0            # [0.7]
+  hsv_v: 0.0            # [0.4]
+  degrees: 10.0         # [0.0] small only: rotated boxes are re-boxed from their corners, up to 1.16x looser at 10 deg
+  fliplr: 0.5           # [0.5]
+  flipud: 0.5           # [0.0] starfish have no "up"
+  mixup: 0.15           # [0.0]
+  scale: 0.2            # [0.5] zoom 0.8x to 1.2x; boxes are 23 to 67 px shortest side (p5 to p95), so 0.5x is unrealistic
