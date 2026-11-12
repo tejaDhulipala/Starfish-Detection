@@ -6,13 +6,13 @@ or counter-clockwise, equally likely) with probability p, and moves the boxes ex
 With flipud 0.5 and fliplr 0.5 also on, p = 0.5 makes all 8 orientations equally likely.
 
 with_rot90(trainer_cls, p) returns a trainer whose training dataset runs RandomRot90 last,
-just before Ultralytics' Format step. It survives close_mosaic, which rebuilds the transforms.
+just before Ultralytics' Format step. It survives close_mosaic, which rebuilds the transforms, and pickles for forkserver workers.
 """
 
 import random
-import types
 
 import numpy as np
+from ultralytics.data.dataset import YOLODataset
 
 
 class RandomRot90:
@@ -42,11 +42,16 @@ class RandomRot90:
         return labels
 
 
-def _build_transforms_with_rot90(self, hyp):
-    transforms = self._build_transforms_orig(hyp)
-    if self.augment:
-        transforms.insert(-1, RandomRot90(self._rot90_p))  # before Format
-    return transforms
+class Rot90YOLODataset(YOLODataset):
+    """YOLODataset whose training transforms end with RandomRot90 (module-level so workers can unpickle it)."""
+
+    rot90_p = 0.0
+
+    def build_transforms(self, hyp=None):
+        transforms = super().build_transforms(hyp)
+        if self.augment and self.rot90_p > 0:
+            transforms.insert(-1, RandomRot90(self.rot90_p))  # before Format
+        return transforms
 
 
 def with_rot90(base, p):
@@ -54,9 +59,10 @@ def with_rot90(base, p):
         def build_dataset(self, img_path, mode="train", batch=None):
             ds = super().build_dataset(img_path, mode, batch)
             if mode == "train" and p > 0:
-                ds._rot90_p = p
-                ds._build_transforms_orig = ds.build_transforms
-                ds.build_transforms = types.MethodType(_build_transforms_with_rot90, ds)
+                if type(ds) is not YOLODataset:
+                    raise TypeError(f"rot90 expects a YOLODataset, got {type(ds).__name__}")
+                ds.__class__ = Rot90YOLODataset
+                ds.rot90_p = p
                 ds.transforms = ds.build_transforms(hyp=self.args)
             return ds
 

@@ -37,3 +37,13 @@ def test_p0_is_identity():
     img = np.random.default_rng(0).integers(0, 255, (60, 100, 3), np.uint8)
     out = RandomRot90(p=0.0)(_labels(img, [[1, 2, 3, 4]]))
     assert np.array_equal(out["img"], img)
+
+
+def test_dataset_class_pickles():
+    import pickle
+
+    from src.train.rot90 import Rot90YOLODataset
+
+    ds = Rot90YOLODataset.__new__(Rot90YOLODataset)
+    ds.rot90_p = 0.5
+    assert pickle.loads(pickle.dumps(ds)).rot90_p == 0.5
