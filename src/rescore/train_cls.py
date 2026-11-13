@@ -181,10 +181,11 @@ def main():
     ap.add_argument("--wd", type=float, default=0.05)
     ap.add_argument("--dropout", type=float, default=0.7)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--tag", default=None, help="default: <cand>_cls26s_<imgsz>")
+    ap.add_argument("--extra", default=None, help="extra always-train crops (e.g. train_jitter from make_train_crops)")
+    ap.add_argument("--tag", default=None, help="default: <cand>_cls26s_<imgsz>[_<extra>]")
     args = ap.parse_args()
 
-    tag = args.tag or f"{args.cand}_cls26s_{args.imgsz}"
+    tag = args.tag or f"{args.cand}_cls26s_{args.imgsz}" + (f"_{args.extra}" if args.extra else "")
     out = ROOT / "model_dev" / "rescore" / tag
     out.mkdir(parents=True, exist_ok=True)
     (out / "args.json").write_text(json.dumps(vars(args), indent=2) + "\n")
@@ -197,12 +198,17 @@ def main():
     ious = np.array([float(r["iou"]) for r in rows])
     folds = np.array([int(r["fold"]) for r in rows])
     det = np.array([float(r["conf"]) for r in rows])
+    x_imgs, x_ious = [], np.zeros(0)
+    if args.extra:
+        x_rows, x_imgs = load_candidates(args.extra)
+        x_ious = np.array([float(r["iou"]) for r in x_rows])
+        print(f"extra {args.extra}: {len(x_imgs)} crops ({(x_ious > 0.3).sum()} with iou > 0.3), added to every fold's training")
     oof = np.full((len(rows), len(BINS)), np.nan)
     t0 = time.time()
     for k in sorted(set(folds)):
         tr, te = np.where(folds != k)[0], np.where(folds == k)[0]
-        print(f"fold {k}: train {len(tr)} crops ({(ious[tr] > 0.3).sum()} pos), score {len(te)}  [{time.time() - t0:.0f}s]", flush=True)
-        model = train_fold([imgs[i] for i in tr], ious[tr], args, dev)
+        print(f"fold {k}: train {len(tr)} crops ({(ious[tr] > 0.3).sum()} pos) + {len(x_imgs)} extra, score {len(te)}  [{time.time() - t0:.0f}s]", flush=True)
+        model = train_fold([imgs[i] for i in tr] + list(x_imgs), np.concatenate([ious[tr], x_ious]), args, dev)
         oof[te] = predict(model, CropSet([imgs[i] for i in te], ious[te], args.imgsz, train=False), args.batch, dev)
         torch.save(model.state_dict(), out / f"fold{k}.pt")
         del model
