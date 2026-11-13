@@ -1,0 +1,34 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: c06 at 4x. Fine-tune c06 best.pt on a 5x3 overlapping grid of 352x352 tiles at imgsz 1408 (4.0x), sliver tiles dropped, 25% empty tiles, c06's augmentation and schedule. Full-frame val at 5120.
+model: model_dev/c06_c05ft_grid493_3x2_seq20val_pos_aug/seed0/weights/best.pt  # warm start from c06 (2.856x); 4x is close enough to adapt
+split: grid352_5x3_seq20val_pos  # make_grid_split --base seq20val_pos --tile 352 --cols 5 --rows 3 --imgsz 1408 --empty-frac 0.25 --name grid352_5x3_seq20val_pos
+fitness: f2             # per-epoch val computes F2; best.pt and early stopping follow it
+val_imgsz: 5120         # full frames at 4x (5120x2880), the scale the tiles are trained at
+val_batch: 2            # 5120 val has ~2x the pixels of c06's 3648
+rot90: 0.5              # exact quarter turn (src/train/rot90.py); with both flips gives all 8 orientations
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1408           # 352 px tile -> 1408 = exactly 4x
+  rect: false           # square tiles, square batches; mosaic and mixup need rect off
+  epochs: 20            # ~17.4k tiles/epoch, ~1.4x c06
+  patience: 10
+  batch: 6              # set from the smoke test's GPU memory; gradients accumulate to nbs=64
+  save_period: 1
+
+  # Warm start from c06; same fine-tune LR as c06.
+  optimizer: AdamW
+  lr0: 0.0005
+  lrf: 0.1              # [0.01] ends at 5e-5
+  warmup_epochs: 1.0    # [3.0]
+  close_mosaic: 5       # [10] mosaic off for the last 5 of 20 epochs
+
+  # Augmentation (Ultralytics defaults in brackets)
+  mosaic: 0.25          # [1.0]
+  mixup: 0.25           # [0.0]
+  hsv_h: 0.0            # [0.015] color jitter off: color is a plausible cue for COTS vs coral
+  hsv_s: 0.0            # [0.7]
+  hsv_v: 0.0            # [0.4]
+  degrees: 0.0          # [0.0] rot90 replaces c05's 10-degree rotation (exact boxes, no loosening)
+  fliplr: 0.5           # [0.5]
+  flipud: 0.5           # [0.0] starfish have no "up"
+  scale: 0.2            # [0.5] same as c04/c05
