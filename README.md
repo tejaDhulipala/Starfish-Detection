@@ -10,7 +10,7 @@ src/                 all code, run as modules from the repo root (python -m src.
   index.py           model_dev/index.csv helpers
   data/              make_yolo_split.py, make_crop_split.py, make_grid_split.py, check_labels.ipynb
   train/             train.py, f2_validator.py, rot90.py
-  eval/              f2.py (competition metric), test_f2.py, evaluate.py
+  eval/              f2.py (competition metric), test_f2.py, evaluate.py, training_curves.py
   inference/         predict.py (frame in, detections out; shared with Kaggle)
 model_dev/
   index.csv          one row per config, with its best F2
