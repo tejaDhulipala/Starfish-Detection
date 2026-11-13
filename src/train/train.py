@@ -12,6 +12,10 @@ makes per-epoch val compute F2 and use it for best.pt and early stopping
 (src/train/f2_validator.py). Without it, Ultralytics' default fitness (mAP50-95) is used.
 Optional val_imgsz / val_batch run per-epoch validation at a different size than training
 (for crop training: train on upscaled crops at 1280, validate on full frames at e.g. 3648).
+Optional rot90: p adds an exact random 90-degree rotation (src/train/rot90.py).
+model may be a pretrained file name (looked up in pretrained/) or a path relative to the repo
+root, e.g. model_dev/<config>/seed0/weights/best.pt to fine-tune an earlier run; its sha256
+is recorded in meta.json.
 
 A config is frozen once it has a real run: if config.yaml no longer matches the hash in
 an existing run's meta.json, training refuses to start. Make a new config folder instead.
@@ -147,7 +151,13 @@ def main():
 
     from ultralytics import YOLO
 
-    model = YOLO(cfg["model"])  # e.g. yolo26s.pt, downloaded into pretrained/ on first use
+    model_src, model_sha = cfg["model"], None
+    if "/" in model_src:  # weights of an earlier run, relative to the repo root
+        model_path = (ROOT / model_src).resolve()
+        if not model_path.exists():
+            sys.exit(f"model {model_path} not found")
+        model_src, model_sha = str(model_path), hashlib.sha256(model_path.read_bytes()).hexdigest()
+    model = YOLO(model_src)  # e.g. yolo26s.pt, downloaded into pretrained/ on first use
 
     meta = {
         "config_name": cfg_dir.name,
@@ -157,6 +167,7 @@ def main():
         "config_sha256": cfg_hash,
         "config": cfg,
         "data_yaml": str(data),
+        "model_sha256": model_sha,
         "git": git_state(),
         "versions": versions(),
         "argv": sys.argv,
@@ -189,6 +200,13 @@ def main():
         from ultralytics.models.yolo.detect import DetectionTrainer
 
         trainer = with_val_overrides(trainer or DetectionTrainer, cfg.get("val_imgsz"), cfg.get("val_batch"))
+
+    if cfg.get("rot90"):
+        from ultralytics.models.yolo.detect import DetectionTrainer
+
+        from src.train.rot90 import with_rot90
+
+        trainer = with_rot90(trainer or DetectionTrainer, float(cfg["rot90"]))
 
     model.train(trainer=trainer, data=str(data), project=str(cfg_dir), name=run_name, exist_ok=True, seed=args.seed, **overrides)
     print(f"\nrun dir: {run_dir}\nnext: python -m src.eval.evaluate --run {run_dir.relative_to(ROOT)}")
