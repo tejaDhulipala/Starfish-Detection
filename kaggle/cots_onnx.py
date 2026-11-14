@@ -42,11 +42,15 @@ def _nms(boxes, scores, iou):
 
 
 class OnnxDetector:
-    def __init__(self, onnx_path, conf=0.01, iou=0.5, max_det=300, max_nms=30000, providers=None):
+    def __init__(self, onnx_path, conf=0.01, iou=0.5, max_det=300, max_nms=30000, providers=None, device_id=0):
         import onnxruntime as ort
 
         if providers is None:
-            providers = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in ort.get_available_providers()]
+            avail = ort.get_available_providers()
+            providers = ["CPUExecutionProvider"]
+            if "CUDAExecutionProvider" in avail and device_id is not None:  # device_id None: CPU
+                cuda = {"device_id": device_id, "arena_extend_strategy": "kSameAsRequested"}
+                providers.insert(0, ("CUDAExecutionProvider", cuda))
         self.sess = ort.InferenceSession(str(onnx_path), providers=providers)
         inp = self.sess.get_inputs()[0]
         self.input_name = inp.name
@@ -85,12 +89,15 @@ class OnnxDetector:
         dets = np.column_stack([s, b[:, 0], b[:, 1], b[:, 2] - b[:, 0], b[:, 3] - b[:, 1]])
         return dets[np.argsort(-s, kind="stable")]
 
+    def run(self, x, meta, frame_hw):
+        """Network + postprocess on an already preprocessed input (shared between same-size models)."""
+        return self.postprocess(self.sess.run(None, {self.input_name: x})[0], meta, frame_hw)
+
     def __call__(self, frame_rgb):
         """frame_rgb: HxWx3 uint8 RGB (as the Kaggle API delivers). Returns (N, 5) conf, x, y, w, h."""
         bgr = np.ascontiguousarray(frame_rgb[..., ::-1])
         x, meta = self.preprocess(bgr)
-        out = self.sess.run(None, {self.input_name: x})[0]
-        return self.postprocess(out, meta, bgr.shape[:2])
+        return self.run(x, meta, bgr.shape[:2])
 
 
 def to_annotation_string(dets, conf_thr):

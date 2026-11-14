@@ -111,6 +111,7 @@ def main():
     ap.add_argument("--config", type=Path, required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--smoke", action="store_true", help="1 epoch on 10%% of train, written to <config>/smoke/")
+    ap.add_argument("--resume", action="store_true", help="continue an interrupted seed<N> run from its weights/last.pt")
     args = ap.parse_args()
 
     cfg_path = args.config.resolve()
@@ -128,6 +129,9 @@ def main():
     run_dir = cfg_dir / run_name
     if args.smoke:
         shutil.rmtree(run_dir, ignore_errors=True)
+    elif args.resume:
+        if not (run_dir / "weights" / "last.pt").exists():
+            sys.exit(f"{run_dir}/weights/last.pt not found, nothing to resume")
     elif run_dir.exists():
         sys.exit(f"{run_dir} already exists. Use another --seed.")
 
@@ -137,7 +141,7 @@ def main():
 
     # Create the run dir up front so the log starts with the first line of output.
     # Uniqueness was checked above, so Ultralytics is told the dir may exist.
-    run_dir.mkdir(parents=True)
+    run_dir.mkdir(parents=True, exist_ok=args.resume)
     tee_output(run_dir / "train.log")
 
     overrides = dict(cfg.get("train", {}))
@@ -157,6 +161,8 @@ def main():
         if not model_path.exists():
             sys.exit(f"model {model_path} not found")
         model_src, model_sha = str(model_path), hashlib.sha256(model_path.read_bytes()).hexdigest()
+    if args.resume:
+        model_src = str(run_dir / "weights" / "last.pt")
     model = YOLO(model_src)  # e.g. yolo26s.pt, downloaded into pretrained/ on first use
 
     meta = {
@@ -174,6 +180,8 @@ def main():
         "started": now(),
         "status": "running",
     }
+    if args.resume:
+        meta["resumed"] = now()
 
     def write_meta(trainer):
         Path(trainer.save_dir, "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
@@ -208,7 +216,10 @@ def main():
 
         trainer = with_rot90(trainer or DetectionTrainer, float(cfg["rot90"]))
 
-    model.train(trainer=trainer, data=str(data), project=str(cfg_dir), name=run_name, exist_ok=True, seed=args.seed, **overrides)
+    if args.resume:  # Ultralytics restores epoch, optimizer, EMA and all train args from last.pt
+        model.train(trainer=trainer, resume=True)
+    else:
+        model.train(trainer=trainer, data=str(data), project=str(cfg_dir), name=run_name, exist_ok=True, seed=args.seed, **overrides)
     print(f"\nrun dir: {run_dir}\nnext: python -m src.eval.evaluate --run {run_dir.relative_to(ROOT)}")
 
 
