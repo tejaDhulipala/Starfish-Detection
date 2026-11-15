@@ -1,0 +1,35 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: Continue c13 (seed0 last.pt, epoch 8, full-val F2 0.695) for 8 epochs in the regime where c13 was still improving. c13 jumped from 0.663 to ~0.69 when mosaic turned off (epochs 6-8, LR 4e-5 to 2e-5), so here mosaic and mixup are off throughout and LR runs 3e-5 to 1e-5 with no warmup. Augmentation otherwise as c13 (zoom 0.8-1.8, rot90, mixup 0.25, flips).
+model: model_dev/c13_c06ft_grid493_3x2_zoomin08-18_lr1e-4_seq20val_pos_aug/seed0/weights/last.pt  # c13 after its 8 epochs
+split: grid493_3x2_seq20val_pos  # made by src.data.make_grid_split --base seq20val_pos (min-visible 0.5, empty-frac 0.25)
+fitness: f2             # per-epoch val computes F2; best.pt and early stopping follow it
+val_imgsz: 3648         # full frames at 2.85x (3648x2080), the scale the tiles are trained at
+val_batch: 4
+rot90: 0.5              # exact quarter turn (src/train/rot90.py); with both flips gives all 8 orientations
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1408           # 493 px tile -> 1408 = 2.856x (1405 rounded up to a multiple of 32)
+  rect: false           # square tiles, square batches; mosaic and mixup need rect off
+  epochs: 8
+  patience: 8
+  batch: 6              # set from the smoke test's GPU memory; gradients accumulate to nbs=64
+  save_period: 1
+
+  # Continuation of a converged run: LR where c13 left off (~2-4e-5), no warmup.
+  optimizer: AdamW
+  lr0: 0.00003          # [0.01] c13 ran 1e-4 -> 1e-5
+  lrf: 0.33             # [0.01] ends at ~1e-5
+  warmup_epochs: 0.0    # [3.0]
+  warmup_bias_lr: 0.0   # [0.1] bias LR ramps up from 0 like the weights
+  close_mosaic: 0       # [10] nothing to close: mosaic and mixup are off from the start
+
+  # Augmentation (Ultralytics defaults in brackets)
+  mosaic: 0.0           # [1.0] off for the whole run (c13 improved once close_mosaic turned it off)
+  mixup: 0.0            # [0.0] off too, as close_mosaic did in c13's last 3 epochs
+  hsv_h: 0.0            # [0.015] color jitter off: color is a plausible cue for COTS vs coral
+  hsv_s: 0.0            # [0.7]
+  hsv_v: 0.0            # [0.4]
+  degrees: 0.0          # [0.0] rot90 replaces c05's 10-degree rotation (exact boxes, no loosening)
+  fliplr: 0.5           # [0.5]
+  flipud: 0.5           # [0.0] starfish have no "up"
+  scale: [0.8, 1.8]     # [0.5] zoom range (min, max), sampled uniformly by RandomPerspective; Ultralytics 8.4 accepts a pair

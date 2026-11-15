@@ -1,0 +1,35 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: c12 (c06 best.pt, lr0 1e-4, no bias-LR spike, 8 epochs) with asymmetric scale augmentation, zoom 0.8-1.8x (was symmetric 0.5-1.5x in c11/c12, 0.8-1.2x in c06). The upper end lets a 118 px train starfish (train max) appear at ~210 px, covering val's 120-228 px close-ups; the lower end stays at c06's 0.8 so small starfish are not shrunk further.
+model: model_dev/c06_c05ft_grid493_3x2_seq20val_pos_aug/seed0/weights/best.pt  # warm start from c06
+split: grid493_3x2_seq20val_pos  # made by src.data.make_grid_split --base seq20val_pos (min-visible 0.5, empty-frac 0.25)
+fitness: f2             # per-epoch val computes F2; best.pt and early stopping follow it
+val_imgsz: 3648         # full frames at 2.85x (3648x2080), the scale the tiles are trained at
+val_batch: 4
+rot90: 0.5              # exact quarter turn (src/train/rot90.py); with both flips gives all 8 orientations
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1408           # 493 px tile -> 1408 = 2.856x (1405 rounded up to a multiple of 32)
+  rect: false           # square tiles, square batches; mosaic and mixup need rect off
+  epochs: 8             # c06 and c11 both peaked early (epochs 6 and 2)
+  patience: 8
+  batch: 6              # set from the smoke test's GPU memory; gradients accumulate to nbs=64
+  save_period: 1
+
+  # Warm start from a converged model: low LR, no bias-LR spike (default warmup_bias_lr 0.1 is an SGD setting).
+  optimizer: AdamW
+  lr0: 0.0001           # [0.01] c06/c11 used 5e-4
+  lrf: 0.1              # [0.01] ends at 1e-5
+  warmup_epochs: 0.5    # [3.0]
+  warmup_bias_lr: 0.0   # [0.1] bias LR ramps up from 0 like the weights
+  close_mosaic: 3       # [10] mosaic off for the last 3 of 8 epochs
+
+  # Augmentation (Ultralytics defaults in brackets)
+  mosaic: 0.25          # [1.0]
+  mixup: 0.25           # [0.0]
+  hsv_h: 0.0            # [0.015] color jitter off: color is a plausible cue for COTS vs coral
+  hsv_s: 0.0            # [0.7]
+  hsv_v: 0.0            # [0.4]
+  degrees: 0.0          # [0.0] rot90 replaces c05's 10-degree rotation (exact boxes, no loosening)
+  fliplr: 0.5           # [0.5]
+  flipud: 0.5           # [0.0] starfish have no "up"
+  scale: [0.8, 1.8]     # [0.5] zoom range (min, max), sampled uniformly by RandomPerspective; Ultralytics 8.4 accepts a pair

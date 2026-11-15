@@ -13,6 +13,8 @@ makes per-epoch val compute F2 and use it for best.pt and early stopping
 Optional val_imgsz / val_batch run per-epoch validation at a different size than training
 (for crop training: train on upscaled crops at 1280, validate on full frames at e.g. 3648).
 Optional rot90: p adds an exact random 90-degree rotation (src/train/rot90.py).
+Optional scale_mix: [[w, lo, hi], ...] samples the zoom from a mixture of uniforms instead of
+train.scale's single uniform (src/train/scale_mix.py).
 model may be a pretrained file name (looked up in pretrained/) or a path relative to the repo
 root, e.g. model_dev/<config>/seed0/weights/best.pt to fine-tune an earlier run; its sha256
 is recorded in meta.json.
@@ -215,6 +217,13 @@ def main():
         from src.train.rot90 import with_rot90
 
         trainer = with_rot90(trainer or DetectionTrainer, float(cfg["rot90"]))
+
+    if cfg.get("scale_mix"):  # outermost, so it wraps rot90's dataset
+        from ultralytics.models.yolo.detect import DetectionTrainer
+
+        from src.train.scale_mix import with_scale_mix
+
+        trainer = with_scale_mix(trainer or DetectionTrainer, cfg["scale_mix"])
 
     if args.resume:  # Ultralytics restores epoch, optimizer, EMA and all train args from last.pt
         model.train(trainer=trainer, resume=True)
