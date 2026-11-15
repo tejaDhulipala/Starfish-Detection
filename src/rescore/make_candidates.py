@@ -32,6 +32,13 @@ VIEW = 1.2  # classifier view: side = VIEW * max(w, h)
 MARGIN = 1.5  # stored side = MARGIN * view side (>= sqrt(2) for 45-degree rotation)
 
 
+def box_sharpness(gray, x, y, w, h):
+    """Laplacian variance of the grey pixels inside the box (clipped to the frame), as src/eval/fail_analysis.py."""
+    H, W = gray.shape[:2]
+    c = gray[int(max(y, 0)) : int(min(y + h, H)), int(max(x, 0)) : int(min(x + w, W))]
+    return float(cv2.Laplacian(c, cv2.CV_32F).var()) if c.size else 0.0
+
+
 def cut(img, cx, cy, side):
     """Square of the given side centred on (cx, cy), padded with 114 outside the frame."""
     s = max(int(round(side)), 4)

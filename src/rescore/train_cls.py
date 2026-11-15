@@ -15,6 +15,14 @@ For each fold k: train on the other folds' crops, score fold k. The OOF scores o
 combined with the detector (fused) confidence and scored with the usual F2 cutoff sweep, against the
 detector-only baseline on the same boxes. Writes model_dev/rescore/<tag>/: args.json, oof.csv,
 results.json, fold<k>.pt.
+
+    python -m src.rescore.train_cls --config model_dev/rescore/<run>/config.yaml
+
+Config mode (run_config): one classifier trained only on data/cls/<run>_train (make_train_crops
+--config), never on val. Val = the detector's cached val boxes; only boxes with conf in rescore.band
+whose own sharpness < rescore.gate_max_sharp are rescored (rule from the config), every other box keeps
+the detector conf. Reports full-val F2, a 10-way split-half check, AUC on the gated boxes and recall
+on blurry GT. Writes model.pt, gated.csv, results.json and meta.json into the config's folder.
 """
 
 import argparse
@@ -22,7 +30,9 @@ import csv
 import json
 import math
 import random
+import sys
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -104,7 +114,7 @@ def predict(model, ds, batch, dev):
     return torch.cat(out).numpy()
 
 
-def train_fold(tr_imgs, tr_ious, args, dev):
+def train_fold(tr_imgs, tr_ious, args, dev, on_epoch=None):
     model = build_model(args.dropout).to(dev)
     ds = CropSet(tr_imgs, tr_ious, args.imgsz, train=True)
     dl = torch.utils.data.DataLoader(ds, batch_size=args.batch, shuffle=True, num_workers=6, drop_last=True, persistent_workers=True)
@@ -124,7 +134,8 @@ def train_fold(tr_imgs, tr_ious, args, dev):
             opt.step()
             sched.step()
             tot, n = tot + loss.item() * len(x), n + len(x)
-        print(f"    epoch {ep + 1}/{args.epochs} loss {tot / n:.4f}", flush=True)
+        extra = on_epoch(model) if on_epoch else ""
+        print(f"    epoch {ep + 1}/{args.epochs} loss {tot / n:.4f}{extra}", flush=True)
     return model
 
 
@@ -171,8 +182,167 @@ def evaluate(rows, det, cls):
     return out
 
 
+RULES = {
+    "det": lambda d, c: d,
+    "det^0.75*cls^0.25": lambda d, c: d**0.75 * c**0.25,
+    "det^0.5*cls^0.5": lambda d, c: np.sqrt(d * c),
+    "det^0.25*cls^0.75": lambda d, c: d**0.25 * c**0.75,
+    "mean": lambda d, c: (d + c) / 2,
+}
+
+
+def gated_val(cfg):
+    """Detector val boxes, plus crops/labels of the gated ones. Returns frames, preds {iid: (N,5)}, gate list."""
+    from src.eval.ensemble import Z, load_cached
+    from src.eval.evaluate import val_frames
+    from src.eval.f2 import iou_matrix
+    from src.rescore.make_candidates import VIEW, box_sharpness, cut
+
+    frames = val_frames("seq20val_pos")
+    P = load_cached(cfg["detector"])
+    lo, hi = cfg["rescore"]["band"]
+    ms = float(cfg["rescore"]["gate_max_sharp"])
+    preds, gate, crops = {}, [], []  # gate: (iid, row index, iou)
+    gt_sharp = []  # (iid, gt index, sharpness)
+    for iid, path, g in frames:
+        p = P.get(iid, Z)
+        preds[iid] = p[np.argsort(-p[:, 0], kind="stable")] if len(p) else Z
+        if not len(p) and not len(g):
+            continue
+        img = cv2.imread(str(path))
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        for k, b in enumerate(g):
+            gt_sharp.append((iid, k, box_sharpness(gray, *b)))
+        p = preds[iid]
+        ious = iou_matrix(p[:, 1:], g).max(1) if len(g) and len(p) else np.zeros(len(p))
+        for j, ((c, x, y, w, h), iou) in enumerate(zip(p, ious)):
+            if lo <= c < hi and box_sharpness(gray, x, y, w, h) < ms:
+                gate.append((iid, j, float(iou)))
+                crops.append(cut(img, x + w / 2, y + h / 2, MARGIN * VIEW * max(w, h))[..., ::-1].copy())  # RGB, as load_candidates
+    return frames, preds, gate, crops, gt_sharp
+
+
+def rescored(preds, gate, cls, rule):
+    out = {i: p.copy() for i, p in preds.items()}
+    for (iid, j, _), c in zip(gate, cls):
+        out[iid][j, 0] = RULES[rule](out[iid][j, 0], c)
+    return {i: p[np.argsort(-p[:, 0], kind="stable")] for i, p in out.items()}
+
+
+def run_config(cfg_path):
+    import hashlib
+
+    import yaml
+
+    from src.eval.ensemble import Z
+    from src.eval.evaluate import CONF_GRID
+    from src.eval.f2 import f2_sweep, iou_matrix
+    from src.paths import split_dir
+
+    cfg_path = Path(cfg_path).resolve()
+    text = cfg_path.read_text()
+    cfg, sha = yaml.safe_load(text), hashlib.sha256(text.encode()).hexdigest()
+    out = cfg_path.parent
+    meta_p = out / "meta.json"
+    if meta_p.exists() and json.loads(meta_p.read_text())["config_sha256"] != sha:
+        sys.exit(f"{cfg_path} changed since its run. Make a new folder.")
+    cc, cr = cfg["classifier"], cfg["crop"]
+    assert cr["view"] == 1.2 and cr["margin"] == MARGIN and list(cc["targets"]) == [round(b, 1) for b in BINS]
+    args = argparse.Namespace(imgsz=cr["imgsz"], epochs=cc["epochs"], batch=cc["batch"], lr=cc["lr"], wd=cc["weight_decay"], dropout=cc["dropout"])
+    seed = cfg["train_crops"]["seed"]
+    random.seed(seed), np.random.seed(seed), torch.manual_seed(seed)
+    dev = torch.device("cuda")
+    t0 = time.time()
+
+    rows, imgs = load_candidates(f"{out.name}_train")
+    ious = np.array([float(r["iou"]) for r in rows])
+    print(f"train crops: {len(imgs)} (iou >= 0.5: {(ious >= 0.5).sum()}, < 0.5: {(ious < 0.5).sum()})  [{time.time() - t0:.0f}s]", flush=True)
+    frames, preds, gate, crops, gt_sharp = gated_val(cfg)
+    g_iou = np.array([t[2] for t in gate])
+    g_det = np.array([preds[i][j, 0] for i, j, _ in gate])
+    tp = g_iou >= 0.5
+    print(f"gated val boxes: {len(gate)} (TP {tp.sum()}, FP {(~tp).sum()})  [{time.time() - t0:.0f}s]", flush=True)
+    vds = CropSet(crops, g_iou, args.imgsz, train=False)
+
+    def on_epoch(model):
+        c = predict(model, vds, args.batch, dev).mean(1)
+        return f"  val AUC (gated, IoU>=0.5) {auc(tp, c):.4f}"
+
+    meta_p.write_text(json.dumps({"config_sha256": sha, "started": time.strftime("%Y-%m-%d %H:%M:%S")}, indent=2) + "\n")
+    model = train_fold(imgs, ious, args, dev, on_epoch=on_epoch)
+    torch.save(model.state_dict(), out / "model.pt")
+    probs = predict(model, vds, args.batch, dev)
+    cls = probs.mean(1)
+    with open(out / "gated.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["image_id", "row", "iou", "det", "cls"] + [f"p{b:.1f}" for b in BINS])
+        for (iid, j, iou), d, c, p in zip(gate, g_det, cls, probs):
+            w.writerow([iid, j, f"{iou:.4f}", f"{d:.5f}", f"{c:.5f}"] + [f"{v:.4f}" for v in p])
+
+    def sweep(P, sub):
+        return f2_sweep([(P.get(i, Z), g) for i, _, g in sub], CONF_GRID)
+
+    res = {"gated": {"n": len(gate), "tp": int(tp.sum()), "fp": int((~tp).sum())},
+           "auc_gated": {"detector": round(auc(tp, g_det), 4), "classifier": round(auc(tp, cls), 4), "rule": round(auc(tp, RULES[cfg["rescore"]["rule"]](g_det, cls)), 4)}}
+    variants = {r: rescored(preds, gate, cls, r) for r in RULES}
+    full = {}
+    for r, P in variants.items():
+        sw = sweep(P, frames)
+        b = int(np.argmax(sw["f2"]))
+        full[r] = {"f2": round(float(sw["f2"][b]), 4), "conf": float(CONF_GRID[b]), "tp50": int(sw["tp"][4, b]), "fp50": int(sw["fp"][4, b]), "fn50": int(sw["fn"][4, b])}
+    res["full_val_f2"] = full
+
+    # split-half: cutoff (and, separately, rule) picked on one half of the val sequences, scored on the other
+    seq = {r["image_id"]: r["sequence"] for r in csv.DictReader(open(split_dir("seq20val_pos") / "split.csv"))}
+    seqs = sorted({seq[i] for i, _, _ in frames})
+    rule, d_fix, d_pick = cfg["rescore"]["rule"], [], []
+    for sd in range(5):
+        h = set(np.random.default_rng(sd).permutation(seqs)[: len(seqs) // 2])
+        A = [f for f in frames if seq[f[0]] in h]
+        B = [f for f in frames if seq[f[0]] not in h]
+        for tu, te in ((A, B), (B, A)):
+            held = {}
+            for r, P in variants.items():
+                st, se = sweep(P, tu)["f2"], sweep(P, te)["f2"]
+                held[r] = (float(st.max()), float(se[int(np.argmax(st))]))
+            d_fix.append(held[rule][1] - held["det"][1])
+            pick = max((r for r in RULES if r != "det"), key=lambda r: held[r][0])
+            d_pick.append(held[pick][1] - held["det"][1])
+    d_fix, d_pick = np.array(d_fix), np.array(d_pick)
+    res["split_half_10"] = {f"{rule}_minus_det": {"mean": round(float(d_fix.mean()), 4), "wins": int((d_fix > 0).sum()), "all": [round(float(v), 4) for v in d_fix]},
+                            "picked_rule_minus_det": {"mean": round(float(d_pick.mean()), 4), "wins": int((d_pick > 0).sum()), "all": [round(float(v), 4) for v in d_pick]}}
+
+    # recall (IoU 0.5, greedy in conf order) of blurry vs sharp GT at each variant's full-val cutoff
+    gts = {iid: g for iid, _, g in frames}
+    blur = {(i, k) for i, k, s in gt_sharp if s < float(cfg["max_sharp"])}
+    rec = {}
+    for r in (rule, "det"):
+        cut_ = full[r]["conf"]
+        hit = {}
+        for iid, g in gts.items():
+            p = variants[r][iid]
+            p = p[p[:, 0] >= cut_]
+            used = np.zeros(len(g), bool)
+            if len(p) and len(g):
+                M = iou_matrix(p[:, 1:], g)
+                for q in range(len(p)):
+                    c = np.where(~used & (M[q] >= 0.5))[0]
+                    if len(c):
+                        used[c[np.argmax(M[q, c])]] = True
+            for k in range(len(g)):
+                hit[(iid, k)] = used[k]
+        b = [hit[x] for x in hit if x in blur]
+        sh = [hit[x] for x in hit if x not in blur]
+        rec[r] = {"blurry": round(float(np.mean(b)), 4), "n_blurry": len(b), "sharp": round(float(np.mean(sh)), 4), "n_sharp": len(sh)}
+    res["recall_blurry_bin"] = rec
+    res["minutes"] = round((time.time() - t0) / 60, 1)
+    (out / "results.json").write_text(json.dumps(res, indent=2) + "\n")
+    print(json.dumps(res, indent=2))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config", default=None, help="config mode (run_config); all other flags are ignored")
     ap.add_argument("--cand", default="ens_c04_c06_c07_c08")
     ap.add_argument("--imgsz", type=int, default=224)
     ap.add_argument("--epochs", type=int, default=15)
@@ -184,6 +354,8 @@ def main():
     ap.add_argument("--extra", default=None, help="extra always-train crops (e.g. train_jitter from make_train_crops)")
     ap.add_argument("--tag", default=None, help="default: <cand>_cls26s_<imgsz>[_<extra>]")
     args = ap.parse_args()
+    if args.config:
+        return run_config(args.config)
 
     tag = args.tag or f"{args.cand}_cls26s_{args.imgsz}" + (f"_{args.extra}" if args.extra else "")
     out = ROOT / "model_dev" / "rescore" / tag

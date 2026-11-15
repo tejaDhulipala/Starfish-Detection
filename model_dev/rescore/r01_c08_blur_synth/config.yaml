@@ -1,0 +1,44 @@
+# Frozen once it has a run: any change means a new folder.
+description: "Blur-specialised rescoring classifier for c08 (run A, no hard negatives). Trained only on synthetic crops from train-sequence frames (blurry GT boxes jittered, blur-matched random background), validated on c08's gated val candidates. Rescores only blurry candidates in c08's uncertain band."
+
+detector: c08                    # candidate source: model_dev/c08_*/seed0/eval/val_preds_best.csv
+sharpness: laplacian_var_box     # cv2.Laplacian(grey pixels inside the box).var(), as src/eval/fail_analysis.py
+max_sharp: 1428.5                # val GT 25th percentile; 6,186 of 10,948 train GT boxes are below it
+
+train_crops:                     # src/rescore/make_train_crops.py; train-sequence frames only, no val frames
+  pos_source: train_gt           # real train GT boxes with sharpness < max_sharp (selected, never blurred)
+  pos_jitter_per_box: 2          # 6,186 boxes x 2 = 12,372 positives
+  pos_iou: [0.5, 1.0]            # jittered box IoU with its GT, sampled uniformly
+  neg_per_pos: 8.3               # gated c08 val candidates: 48 TP vs 396 FP
+  neg_loose_frac: 0.013          # 5 of the 396 gated FPs have IoU 0.1-0.5 with a GT
+  neg_loose_iou: [0.1, 0.5]      # jittered boxes on blurry train GT, IoU in this range
+  neg_background: random         # sides from the train GT size distribution, IoU 0 with all GT
+  neg_frames: all_train_seq      # the 4,211 positive + 14,827 empty train-sequence frames
+  neg_blur_match: true           # background boxes kept only if their sharpness < max_sharp (51% pass)
+  hard_negatives: none           # run A; run B would add c08 FPs from the 14,827 unseen empty frames
+  seed: 0
+
+crop:
+  view: 1.2                      # square side = 1.2 * max(w, h), centred on the box
+  margin: 1.5                    # stored at 1.5x the view for rotation augmentation
+  imgsz: 224
+
+classifier:
+  model: yolo26s-cls.pt          # ImageNet-pretrained, 1000-way head replaced by 7 IoU bins
+  targets: [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]   # BCE on cumulative bins iou > t; score = mean sigmoid
+  epochs: 15                     # fixed, last epoch used; val never selects a checkpoint
+  batch: 64
+  lr: 0.0005
+  weight_decay: 0.05
+  dropout: 0.7
+  augment: [rot45, hflip, vflip, transpose, cutout]   # as the existing train_cls
+
+rescore:
+  band: [0.05, 0.40]             # only c08 boxes with conf in [0.05, 0.40) ...
+  gate_max_sharp: 1428.5         # ... whose own predicted-box sharpness < this (444 val boxes: 48 TP, 396 FP)
+  rule: det^0.75*cls^0.25        # everything else keeps c08's conf
+  report:
+    - full_val_f2                # vs c08 alone, 0.721
+    - split_half_10              # rule and cutoff picked on one half of the sequences, scored on the other
+    - auc_gated                  # TP vs FP separation on the 444 gated boxes
+    - recall_blurry_bin
