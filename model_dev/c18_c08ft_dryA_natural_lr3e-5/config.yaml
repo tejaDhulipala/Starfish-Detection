@@ -1,0 +1,33 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: Dry run for the train+val retrain. c08 best.pt fine-tuned on train plus val half A (sequences 0/40258, 0/45518, 1/29424, 2/26651 from seq20val_pos; held-out seed-0 half), natural data ratio. Per-epoch val on half B only (1/17665, 1/18048, 1/44160, 1/60510), which nothing has trained on. Measures whether the new data helps, the stopping epoch and the cutoff shift. c15's low-LR regime (AdamW 3e-5 to 1e-5, no warmup, mosaic and mixup off), c08's augmentation otherwise.
+model: model_dev/c08_yolo26m_grid493_3x2_seq20val_pos_aug/seed0/weights/best.pt  # warm start from c08
+split: grid493_3x2_seq20val_pos_dryA  # make_addval_split --half-seed 0 --name seq20val_pos_dryA, then make_grid_split --base seq20val_pos_dryA
+fitness: f2
+val_imgsz: 3648
+val_batch: 2
+rot90: 0.5
+
+train:
+  imgsz: 1408
+  rect: false
+  epochs: 12
+  patience: 12
+  batch: 3              # as c08
+  save_period: 1
+
+  optimizer: AdamW
+  lr0: 0.00003          # c15/c14: the only fine-tunes that never dropped after epoch 1
+  lrf: 0.33
+  warmup_epochs: 0.0
+  warmup_bias_lr: 0.0
+  close_mosaic: 0
+
+  mosaic: 0.0
+  mixup: 0.0
+  hsv_h: 0.0
+  hsv_s: 0.0
+  hsv_v: 0.0
+  degrees: 0.0
+  fliplr: 0.5
+  flipud: 0.5
+  scale: 0.2            # c08's
