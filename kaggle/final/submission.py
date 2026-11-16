@@ -1,6 +1,6 @@
 """Kaggle submission: final ensemble (8 votes, 10 passes), FP16 dynamic-shape ONNX, one session per model.
 
-Votes (WBF, conf = sum / 8): c08 at 4 rotations (0/90/180/270 deg at long side 3648/3840/4032/3648),
+Votes (WBF, conf = sum / 8): c08 at 4 rotations (0/90/180/270 deg at long side 3648 each, to fit the 9 h limit),
 c06 at 3648, c07 at 3840, c13 at 4032, and c17 at 1920 + 2112 + 2304 pre-fused into one vote.
 Val (pre-retrain weights, passes at native size): F2 0.7583 at cutoff 0.16, held-out 0.7341.
 The +200-400 px sizes for c08 / c07 / c13 follow 2nd place and were not validated.
@@ -18,7 +18,7 @@ import time
 CONF_THR = 0.19
 WBF_THR = 0.4
 PASSES = [  # (vote group, model, quarter turns CCW, long side)
-    ("c08_0", "c08", 0, 3648), ("c08_90", "c08", 1, 3840), ("c08_180", "c08", 2, 4032), ("c08_270", "c08", 3, 3648),
+    ("c08_0", "c08", 0, 3648), ("c08_90", "c08", 1, 3648), ("c08_180", "c08", 2, 3648), ("c08_270", "c08", 3, 3648),
     ("c06", "c06", 0, 3648), ("c07", "c07", 0, 3840), ("c13", "c13", 0, 4032),
     ("c17", "c17", 0, 1920), ("c17", "c17", 0, 2112), ("c17", "c17", 0, 2304),
 ]
