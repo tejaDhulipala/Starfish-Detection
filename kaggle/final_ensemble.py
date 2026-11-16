@@ -7,10 +7,11 @@ does), run, map the boxes back to the unrotated frame. Passes in the same group 
 into one vote (c17's 3 sizes); then all groups are WBF-fused with conf = sum / n_groups. Mirrors the
 val scoring in the scratchpad's c17var.py (src.eval.ensemble.wbf, IoU 0.4).
 
-Models are pinned to GPUs; each GPU runs its passes sequentially in its own thread, the GPUs in parallel.
+Models are pinned to GPUs; each GPU runs its passes sequentially in its own dedicated thread, the GPUs in parallel.
 """
 
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -55,19 +56,28 @@ class FinalEnsemble:
         for i, (_, m, _, _) in enumerate(self.passes):
             by_gpu.setdefault(model_gpu[m], []).append(i)
         self.by_gpu = list(by_gpu.values())
-        self.pool = ThreadPoolExecutor(max_workers=len(self.by_gpu))
+        # one single-thread pool per GPU, so each GPU's sessions are only ever run from the same thread
+        self.pools = [ThreadPoolExecutor(max_workers=1) for _ in self.by_gpu]
+        self.times = [[] for _ in self.passes]  # seconds per call of each pass (network + pre/post), for the benchmark
 
     def run_pass(self, bgr, i):
+        """Always called from the thread of the pass's GPU. Notebook v1 ran passes from the main thread after
+        warm-up in pool threads and a T4 ran out of memory; likely onnxruntime's per-thread CUDA state
+        (cuDNN/cuBLAS handles and workspace) being set up a second time."""
+        t = time.time()
         _, m, k, L = self.passes[i]
         img = np.ascontiguousarray(np.rot90(bgr, k)) if k % 4 else bgr
         x, meta = self.dets[m].preprocess(img, shape=input_shape(L, k))
-        return unrotate(self.dets[m].run(x, meta, img.shape[:2]), k)
+        out = unrotate(self.dets[m].run(x, meta, img.shape[:2]), k)
+        self.times[i].append(time.time() - t)
+        return out
 
     def predict_passes(self, frame_rgb):
         bgr = np.ascontiguousarray(frame_rgb[..., ::-1])
         out = [None] * len(self.passes)
-        for res in self.pool.map(lambda idx: [(i, self.run_pass(bgr, i)) for i in idx], self.by_gpu):
-            for i, p in res:
+        futs = [pool.submit(lambda idx=idx: [(i, self.run_pass(bgr, i)) for i in idx]) for pool, idx in zip(self.pools, self.by_gpu)]
+        for f in futs:
+            for i, p in f.result():
                 out[i] = p
         return out
 

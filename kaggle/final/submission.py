@@ -42,16 +42,14 @@ gpu = {m: (g if n_gpu > 1 else 0) for m, g in GPU.items()}
 
 
 def benchmark(ens, frame, reps=5):
-    bgr = np.ascontiguousarray(frame[..., ::-1])
-    for i, p in enumerate(ens.passes):
-        t = time.time()
-        for _ in range(reps):
-            ens.run_pass(bgr, i)
-        print("bench", p, "%.3f s/frame" % ((time.time() - t) / reps), flush=True)
+    """Per-pass times are recorded inside the GPU threads (see FinalEnsemble.run_pass)."""
+    ens.times = [[] for _ in ens.passes]
     t = time.time()
     for _ in range(reps):
         ens(frame)
     print("bench ensemble end-to-end %.3f s/frame" % ((time.time() - t) / reps), flush=True)
+    for p, ts in zip(ens.passes, ens.times):
+        print("bench", p, "gpu", gpu[p[1]], "%.3f s/frame" % np.mean(ts), flush=True)
     subprocess.run("nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv", shell=True)
 
 
