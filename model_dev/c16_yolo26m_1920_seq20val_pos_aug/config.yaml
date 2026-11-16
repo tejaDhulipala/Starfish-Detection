@@ -1,0 +1,26 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: c04 (whole frames at imgsz 1920, 1.5x) on YOLO26m from COCO, with the augmentation learned in c06-c08 (exact rot90 instead of 10-degree rotation, mosaic 0.25, mixup 0.25). Split, schedule and other settings as c04. A stronger 1.5x member for the ensemble.
+model: yolo26m.pt       # file in pretrained/ (c08's starting weights)
+split: seq20val_pos     # as c04: train frames with starfish only
+fitness: f2             # per-epoch val computes F2; best.pt and early stopping follow it
+rot90: 0.5              # exact quarter turn (src/train/rot90.py); with both flips gives all 8 orientations
+
+train:                  # passed straight to ultralytics model.train()
+  imgsz: 1920           # 1.5x upscale, as c04
+  rect: false           # square batches; mosaic and mixup need rect off (as c04 by default)
+  epochs: 45            # as c04
+  patience: 25          # as c04
+  batch: 2              # no smoke test (started directly): batch 3 est. ~17 GB from c08's 9.1 GB at batch 3 x 1408^2 scaled to 1920^2; accumulates to nbs=64
+  save_period: 1
+  close_mosaic: 10      # [10] mosaic off for the last 10 epochs, as c04 and c08
+
+  # Augmentation (Ultralytics defaults in brackets)
+  mosaic: 0.25          # [1.0] as c06-c08 (c04 used the default 1.0)
+  mixup: 0.25           # [0.0] as c06-c08 (c04 used 0.15)
+  hsv_h: 0.0            # [0.015] color jitter off: color is a plausible cue for COTS vs coral
+  hsv_s: 0.0            # [0.7]
+  hsv_v: 0.0            # [0.4]
+  degrees: 0.0          # [0.0] rot90 instead (c04 used 10, which loosens boxes)
+  fliplr: 0.5           # [0.5]
+  flipud: 0.5           # [0.0] starfish have no "up"
+  scale: 0.2            # [0.5] zoom 0.8x to 1.2x

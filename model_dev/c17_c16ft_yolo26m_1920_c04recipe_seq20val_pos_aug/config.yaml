@@ -1,0 +1,22 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: "Fine-tune of c16 best.pt (YOLO26m, 1920) with c04's exact recipe (mosaic 1.0, mixup 0.15, 10 degree rotation, no rot90), batch 2. Tests whether c16's augmentation change cost it vs c04."
+model: model_dev/c16_yolo26m_1920_seq20val_pos_aug/seed0/weights/best.pt   # c16 best (epoch 39)
+split: seq20val_pos     # as c04
+fitness: f2             # as c04
+
+train:
+  imgsz: 1920           # as c04
+  epochs: 25            # c04 used 45; shorter since this starts from a trained c16
+  patience: 25          # as c04
+  batch: 2              # batch 3 smoke: 18.1 GB > 16 GB, spilled to shared memory at 5.1 s/it (about 20x slower); accumulates to nbs=64
+  save_period: 1
+
+  # Augmentation: identical to c04 (Ultralytics defaults in brackets)
+  hsv_h: 0.0            # [0.015]
+  hsv_s: 0.0            # [0.7]
+  hsv_v: 0.0            # [0.4]
+  degrees: 10.0         # [0.0] as c04
+  fliplr: 0.5           # [0.5]
+  flipud: 0.5           # [0.0]
+  mixup: 0.15           # [0.0] as c04
+  scale: 0.2            # [0.5] as c04
