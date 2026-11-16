@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-CONF_THR = 0.16
+CONF_THR = 0.19
 WBF_THR = 0.4
 PASSES = [  # (vote group, model, quarter turns CCW, long side)
     ("c08_0", "c08", 0, 3648), ("c08_90", "c08", 1, 3840), ("c08_180", "c08", 2, 4032), ("c08_270", "c08", 3, 3648),

@@ -1,0 +1,28 @@
+# Frozen once it has a seed run: any change means a new config folder.
+description: 'Final train+val retrain of c17 best.pt: c17 augmentation without mosaic/mixup,
+  AdamW lr 3e-5 nearly flat (lrf 0.9), 2 epochs, val off (dry run c18/c19 peaked at
+  epoch 1-2). Use last.pt.'
+model: model_dev/c17_c16ft_yolo26m_1920_c04recipe_seq20val_pos_aug/seed0/weights/best.pt
+split: seq20val_pos_trainval
+fitness: f2
+train:
+  imgsz: 1920
+  epochs: 2
+  batch: 2
+  save_period: 1
+  hsv_h: 0.0
+  hsv_s: 0.0
+  hsv_v: 0.0
+  degrees: 10.0
+  fliplr: 0.5
+  flipud: 0.5
+  scale: 0.2
+  val: false
+  optimizer: AdamW
+  lr0: 3.0e-05
+  lrf: 0.9
+  warmup_epochs: 0.0
+  warmup_bias_lr: 0.0
+  close_mosaic: 0
+  mosaic: 0.0
+  mixup: 0.0
