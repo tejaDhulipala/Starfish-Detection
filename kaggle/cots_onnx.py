@@ -54,24 +54,27 @@ class OnnxDetector:
         self.sess = ort.InferenceSession(str(onnx_path), providers=providers)
         inp = self.sess.get_inputs()[0]
         self.input_name = inp.name
-        self.in_h, self.in_w = inp.shape[2], inp.shape[3]
+        self.in_dtype = np.float16 if inp.type == "tensor(float16)" else np.float32  # FP16 export takes fp16 input
+        self.in_h, self.in_w = inp.shape[2], inp.shape[3]  # strings for a dynamic-shape export: pass shape= to preprocess
         self.conf, self.iou, self.max_det, self.max_nms = conf, iou, max_det, max_nms
 
-    def preprocess(self, bgr):
+    def preprocess(self, bgr, shape=None):
+        """shape: (H, W) network input for a dynamic-shape model (multiples of 32); default the model's fixed input."""
+        in_h, in_w = shape if shape is not None else (self.in_h, self.in_w)
         h, w = bgr.shape[:2]
-        r = min(self.in_h / h, self.in_w / w)
+        r = min(in_h / h, in_w / w)
         nw, nh = max(int(round(w * r)), 1), max(int(round(h * r)), 1)
-        dw, dh = (self.in_w - nw) / 2, (self.in_h - nh) / 2
+        dw, dh = (in_w - nw) / 2, (in_h - nh) / 2
         top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
         left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
         img = bgr if (nw, nh) == (w, h) else cv2.resize(bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
         img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
-        x = img[..., ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0
+        x = (img[..., ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0).astype(self.in_dtype)
         return np.ascontiguousarray(x), (r, nw, nh, left, top)
 
     def postprocess(self, out, meta, frame_hw):
         r, nw, nh, left, top = meta
-        p = out[0].T  # (N, 5)
+        p = out[0].T.astype(np.float32)  # (N, 5); FP16 exports return fp16
         p = p[p[:, 4] > self.conf]
         if len(p) == 0:
             return np.zeros((0, 5))
